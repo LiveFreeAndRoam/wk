@@ -1,70 +1,128 @@
-# Getting Started with Create React App
+# 🏮 WaniKani Example Sentence Fetcher
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A **React + Grommet** web application that uses the **WaniKani API** to fetch all example sentences from vocabulary lessons in one or more specified levels. Sentences are grouped by level and can be exported as text or JSON files.
 
-## Available Scripts
+---
 
-In the project directory, you can run:
+## ✨ Features
 
-### `npm start`
+* Fetch example sentences from **multiple WaniKani levels**.
+* Accepts flexible level input formats:
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+  * Single: `12`
+  * Comma-separated: `3,5,8`
+  * Ranges: `4-9`
+  * Mixed: `4,5-7,9-12,15`
+* Groups sentences by level.
+* Export options:
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+  * **Japanese sentences only** (`.txt` per level)
+  * **English sentences only** (`.txt` per level)
+  * **Full sentences** (Japanese + English) (`.txt` per level)
+  * **All data as JSON** (`wanikani_sentences.json`)
+* Automatically saves and restores your **WaniKani API token** using `localStorage`.
+* Clean, responsive UI powered by **Grommet**.
+* Handles browser throttling on export by queuing file downloads.
 
-### `npm test`
+---
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+## 🧩 Requirements
 
-### `npm run build`
+* **Node.js** ≥ 18
+* **npm** or **yarn**
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+---
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## 🚀 Getting Started
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+### 1️⃣ Clone the Repository
 
-### `npm run eject`
+```bash
+git clone https://github.com/yourusername/wanikani-sentence-fetcher.git
+cd wanikani-sentence-fetcher
+```
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+### 2️⃣ Install Dependencies
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```bash
+npm install
+# or
+yarn install
+```
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+### 3️⃣ Run the App
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+```bash
+npm start
+# or
+yarn start
+```
 
-## Learn More
+The app will open automatically at `http://localhost:3000/`.
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+---
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+## 🔑 API Token Setup
 
-### Code Splitting
+1. Log into your WaniKani account.
+2. Go to **Settings → API Tokens**.
+3. Create a **v2 API token**.
+4. Copy the token and paste it into the app’s **API Token** field.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+The token will be securely saved in `localStorage` and reused next time you open the app.
 
-### Analyzing the Bundle Size
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+## 💾 Export Behavior
 
-### Making a Progressive Web App
+When exporting results for multiple levels (e.g., `3,5,7-9`):
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+* Each level’s sentences are saved in **separate files**.
+* The app automatically adds a small delay between downloads to prevent browser throttling.
 
-### Advanced Configuration
+File naming examples:
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+```
+wanikani_level_3_japanese.txt
+wanikani_level_3_english.txt
+wanikani_level_3_sentences.txt
+wanikani_sentences.json
+```
 
-### Deployment
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+## 🧠 Tech Stack
 
-### `npm run build` fails to minify
+* **React 18+**
+* **Grommet UI Library** – [https://v2.grommet.io](https://v2.grommet.io)
+* **WaniKani API v2** – [https://docs.api.wanikani.com/20170710](https://docs.api.wanikani.com/20170710)
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+---
+
+## ⚙️ Implementation Notes
+
+* The fetcher respects WaniKani’s rate limits (60 requests/minute).
+* Parsing of level input uses a custom `parseLevels()` utility.
+* File export is handled with timed `Blob` downloads to ensure reliability.
+* Token persistence implemented via `localStorage`.
+
+---
+
+## 📄 License
+
+This project is licensed under the **MIT License**.
+
+---
+
+## 💬 Contributing
+
+Pull requests are welcome! For major changes, please open an issue first to discuss what you’d like to change.
+
+---
+
+### 🧭 Future Improvements
+
+* [ ] Parallelized fetching with rate-limit handling.
+* [ ] Search and filter sentences by keyword.
+* [ ] Option to export in CSV format.
+* [ ] Persistent sentence cache.
