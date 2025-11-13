@@ -1,210 +1,276 @@
-import React, { useState } from 'react';
-import { Grommet, Box, Heading, TextInput, Button, DataTable, Text, Spinner, Form, FormField, Layer, DropButton, Menu } from 'grommet';
+import React, { useState, useEffect } from "react";
+import {
+  Grommet,
+  Box,
+  Button,
+  TextInput,
+  Heading,
+  Text,
+  Spinner,
+  DropButton,
+} from "grommet";
 
+/**
+ * Grommet theme for a clean and consistent look.
+ */
 const theme = {
   global: {
-    font: { family: 'Helvetica, Arial, sans-serif' },
+    font: { family: "Roboto", size: "18px", height: "20px" },
   },
 };
 
-async function fetchAllPages(url, headers, onProgress) {
-  let all = [];
-  let next = url;
-  while (next) {
-    const res = await fetch(next, { headers });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    const json = await res.json();
-    if (json.data && Array.isArray(json.data)) {
-      all = all.concat(json.data);
-    }
-    next = json.pages && json.pages.next_url ? json.pages.next_url : null;
-    if (onProgress) onProgress(all.length);
-  }
-  return all;
+/**
+ * Parses a string of level specifications into an array of integers.
+ *
+ * Supported formats:
+ *  - Single number: "12"
+ *  - Comma-separated: "3,5,8"
+ *  - Range: "4-9"
+ *  - Mixed: "4,5-7,9-12,15"
+ *
+ * Example:
+ *  parseLevels("4,5-7,9-12,15") => [4,5,6,7,9,10,11,12,15]
+ */
+function parseLevels(levelInput) {
+  const result = new Set();
+  if (!levelInput) return [];
+
+  levelInput
+    .split(",")
+    .map((part) => part.trim())
+    .forEach((part) => {
+      if (part.includes("-")) {
+        const [start, end] = part.split("-").map(Number);
+        if (!isNaN(start) && !isNaN(end)) {
+          for (let i = start; i <= end; i++) result.add(i);
+        }
+      } else {
+        const num = Number(part);
+        if (!isNaN(num)) result.add(num);
+      }
+    });
+
+  return Array.from(result).sort((a, b) => a - b);
 }
 
-function extractSentencesFromSubject(subject) {
-  const data = subject.data || {};
-  if (Array.isArray(data.context_sentences) && data.context_sentences.length) {
-    return data.context_sentences.map((s, i) => ({ id: `${subject.id}-ctx-${i}`, japanese: s.ja || s.japanese || s.jp || s.ja_text || s.text || '', english: s.en || s.english || s.en_text || '' }));
-  }
-  for (const key of Object.keys(data)) {
-    const val = data[key];
-    if (Array.isArray(val) && val.length && typeof val[0] === 'object') {
-      const looksLikeSentence = val.some(v => v && (v.ja || v.japanese || v.en || v.english || v.text));
-      if (looksLikeSentence) {
-        return val.map((s, i) => ({ id: `${subject.id}-${key}-${i}`, japanese: s.ja || s.japanese || s.text || '', english: s.en || s.english || '' }));
+/**
+ * Fetches example sentences for multiple levels from WaniKani API.
+ * Groups sentences by level.
+ */
+async function fetchSentences(levels, apiToken) {
+  const allData = {};
+
+  for (const level of levels) {
+    const response = await fetch(
+      `https://api.wanikani.com/v2/subjects?levels=${level}`,
+      {
+        headers: { Authorization: `Bearer ${apiToken}` },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch level ${level}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const sentences = [];
+
+    for (const subject of data.data) {
+      if (subject.data.context_sentences) {
+        subject.data.context_sentences.forEach((s) => {
+          sentences.push({
+            japanese: s.ja,
+            english: s.en,
+          });
+        });
       }
     }
+
+    allData[level] = sentences;
   }
-  if (data.characters) {
-    return [{ id: `${subject.id}-fallback-0`, japanese: data.characters, english: (data.meanings && data.meanings[0] && data.meanings[0].meaning) || '' }];
-  }
-  return [];
+
+  return allData;
 }
 
-export default function App() {
-  const [apiToken, setApiToken] = useState('bd3399a6-3daa-45c7-96b2-96b612c40d92');
-  const [level, setLevel] = useState('1');
-  const [loading, setLoading] = useState(false);
-  const [progressCount, setProgressCount] = useState(0);
-  const [groups, setGroups] = useState({});
-  const [error, setError] = useState();
-  const [showExportLayer, setShowExportLayer] = useState(false);
+/**
+ * Creates and triggers a file download.
+ * Using setTimeout between downloads avoids browser throttling or blocking
+ * when exporting many files.
+ */
+function exportToFile(filename, content, delay = 300) {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      resolve();
+    }, delay);
+  });
+}
 
-  async function handleFetch() {
-    setError(undefined);
-    setGroups({});
-    setProgressCount(0);
+/**
+ * Main application component.
+ */
+function WaniKaniSentenceApp() {
+  const [apiToken, setApiToken] = useState("");
+  const [levelInput, setLevelInput] = useState("");
+  const [sentencesByLevel, setSentencesByLevel] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  /** Prefill token from localStorage on mount */
+  useEffect(() => {
+    const storedToken = localStorage.getItem("wanikani_api_token");
+    if (storedToken) {
+      setApiToken(storedToken);
+    }
+  }, []);
+
+  /** Save token to localStorage on change */
+  useEffect(() => {
+    if (apiToken) {
+      localStorage.setItem("wanikani_api_token", apiToken);
+    }
+  }, [apiToken]);
+
+  /** Handles the “Fetch Sentences” action */
+  const handleFetch = async () => {
+    setError("");
+    const levels = parseLevels(levelInput);
+
+    if (levels.length === 0) {
+      setError("Please enter valid level(s).");
+      return;
+    }
+
     setLoading(true);
     try {
-      if (!apiToken) throw new Error('Please provide your WaniKani API token.');
-      const headers = { Authorization: `Bearer ${apiToken}`, 'Wanikani-Revision': '20170710' };
-
-      const baseUrl = `https://api.wanikani.com/v2/subjects?types=vocabulary&levels=${encodeURIComponent(level)}&per_page=500`;
-      const subjects = await fetchAllPages(baseUrl, headers, (n) => setProgressCount(n));
-
-      const levelKey = `Level ${level}`;
-      const collected = [];
-      for (const s of subjects) {
-        const sentences = extractSentencesFromSubject(s);
-        if (sentences.length) {
-          collected.push({ subject_id: s.id, slug: s.data && s.data.slug, characters: s.data && s.data.characters, sentences });
-        }
-      }
-
-      setGroups({ [levelKey]: collected });
-    } catch (e) {
-      setError(e.message || String(e));
+      const data = await fetchSentences(levels, apiToken);
+      setSentencesByLevel(data);
+    } catch (err) {
+      console.error(err);
+      setError("Error fetching data. Please check your API token.");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
-  function saveFile(filename, content, type = 'text/plain') {
-    const blob = new Blob([content], { type });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+  /** Exports only Japanese sentences */
+  const exportJapaneseOnly = async () => {
+    for (const [level, sentences] of Object.entries(sentencesByLevel)) {
+      const text = sentences.map((s) => s.japanese).join("\n");
+      await exportToFile(`wanikani_level_${level}_japanese.txt`, text);
+    }
+  };
+
+  /** Exports only English sentences */
+  const exportEnglishOnly = async () => {
+    for (const [level, sentences] of Object.entries(sentencesByLevel)) {
+      const text = sentences.map((s) => s.english).join("\n");
+      await exportToFile(`wanikani_level_${level}_english.txt`, text);
+    }
+  };
+
+  /** Exports full Japanese + English sentences */
+  const exportFullText = async () => {
+    for (const [level, sentences] of Object.entries(sentencesByLevel)) {
+      const text = sentences
+        .map((s) => `${s.japanese}\n${s.english}`)
+        .join("\n\n");
+      await exportToFile(`wanikani_level_${level}_sentences.txt`, text);
+    }
+  };
+
+  /** Exports the entire fetched data as JSON */
+  const exportAsJSON = () => {
+    const blob = new Blob([JSON.stringify(sentencesByLevel, null, 2)], {
+      type: "application/json",
+    });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
     a.href = url;
-    a.download = filename;
+    a.download = "wanikani_sentences.json";
     a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function handleSaveJSON() {
-    saveFile(`wanikani-sentences-level-${level}.json`, JSON.stringify(groups, null, 2), 'application/json');
-  }
-
-  function exportText(option) {
-    let lines = [];
-    for (const [lvl, items] of Object.entries(groups)) {
-      lines.push(`# ${lvl}`);
-      for (const it of items) {
-        lines.push(`\n## ${it.characters || it.slug || it.subject_id}`);
-        for (const s of it.sentences) {
-          if (option === 'japanese') {
-            lines.push(s.japanese);
-          } else if (option === 'english') {
-            lines.push(s.english);
-          } else {
-            lines.push(`${s.japanese} \t ${s.english}`);
-          }
-        }
-      }
-    }
-    saveFile(`wanikani-sentences-level-${level}-${option}.txt`, lines.join('\n'));
-  }
-
-  const tableData = [];
-  const firstKey = Object.keys(groups)[0];
-  if (firstKey) {
-    for (const item of groups[firstKey]) {
-      for (const sent of item.sentences) {
-        tableData.push({ subject: item.characters || item.slug || item.subject_id, japanese: sent.japanese, english: sent.english });
-      }
-    }
-  }
+    window.URL.revokeObjectURL(url);
+  };
 
   return (
     <Grommet theme={theme} full>
-      <Box pad="medium" gap="small" align="start">
-        <Heading level={2} margin="none">WaniKani — Fetch example sentences by level</Heading>
-        <Text>This small app fetches vocabulary subjects for the given level from the WaniKani API and extracts example/context sentences (if available).</Text>
+      <Box pad="medium" align="center" gap="medium">
+        <Heading level={2}>WaniKani Example Sentence Fetcher</Heading>
 
-        <Form onSubmit={(e) => { e.preventDefault(); handleFetch(); }}>
-          <Box direction="row" gap="small" align="center" pad={{ top: 'small' }}>
-            <FormField label="WaniKani API Token" name="token" style={{ minWidth: 420 }}>
-              <TextInput value={apiToken} onChange={(e) => setApiToken(e.target.value)} placeholder="Paste your WaniKani API token here" />
-            </FormField>
-
-            <FormField label="Level" name="level">
-              <TextInput value={level} onChange={(e) => setLevel(e.target.value)} style={{ width: 80 }} />
-            </FormField>
-
-            <Button primary label="Fetch" onClick={handleFetch} />
-          </Box>
-        </Form>
-
-        {loading && (
-          <Box direction="row" gap="small" align="center">
-            <Spinner />
-            <Text>Fetching subjects... (found {progressCount})</Text>
-          </Box>
-        )}
-
-        {error && <Text color="status-error">Error: {error}</Text>}
-
-        {firstKey && (
-          <Box width="100%">
-            <Box direction="row" justify="between" align="center" margin={{ vertical: 'small' }}>
-              <Heading level={3} margin="none">{firstKey} — Sentences</Heading>
-              <Box direction="row" gap="small">
-                <Button label="Export JSON" onClick={() => { handleSaveJSON(); setShowExportLayer(true); }} />
-                <DropButton
-                  label="Export Text"
-                  dropAlign={{ top: 'bottom', right: 'right' }}
-                  dropContent={
-                    <Box pad="small" background="light-2">
-                      <Button label="Japanese Only" onClick={() => { exportText('japanese'); setShowExportLayer(true); }} />
-                      <Button label="English Only" onClick={() => { exportText('english'); setShowExportLayer(true); }} />
-                      <Button label="Both (Japanese + English)" onClick={() => { exportText('both'); setShowExportLayer(true); }} />
-                    </Box>
-                  }
-                />
-              </Box>
-            </Box>
-
-            <DataTable
-              columns={[
-                { property: 'subject', header: 'Subject' },
-                { property: 'japanese', header: 'Japanese' },
-                { property: 'english', header: 'English' },
-              ]}
-              data={tableData}
-              primaryKey={false}
-            />
-          </Box>
-        )}
-
-        {showExportLayer && (
-          <Layer onEsc={() => setShowExportLayer(false)} onClickOutside={() => setShowExportLayer(false)}>
-            <Box pad="medium" gap="small" width="medium">
-              <Heading level={3} margin="none">Export started</Heading>
-              <Text>Your file download should have started. Close to continue.</Text>
-              <Box direction="row" justify="end">
-                <Button label="Close" onClick={() => setShowExportLayer(false)} />
-              </Box>
-            </Box>
-          </Layer>
-        )}
-
-        <Box pad={{ top: 'small' }}>
-          <Text size="small">Notes:</Text>
-          <Text size="small">• The app uses WaniKani v2 API and requires an API token in the Authorization header.</Text>
-          <Text size="small">• The subjects endpoint is paginated; this app follows the `pages.next_url` returned by the API.</Text>
-          <Text size="small">• Not all vocabulary subjects include example/context sentences — this app uses heuristics to find them and will fall back to the subject characters if no sentences are present.</Text>
+        {/* API token input */}
+        <Box width="medium">
+          <TextInput
+            placeholder="Enter your WaniKani API Token"
+            value={apiToken}
+            onChange={(e) => setApiToken(e.target.value)}
+          />
         </Box>
+
+        {/* Level input */}
+        <Box width="medium">
+          <TextInput
+            placeholder="Enter levels (e.g. 4,5-7,9-12,15)"
+            value={levelInput}
+            onChange={(e) => setLevelInput(e.target.value)}
+          />
+        </Box>
+
+        {/* Fetch button */}
+        <Button
+          label="Fetch Sentences"
+          onClick={handleFetch}
+          primary
+          disabled={loading || !apiToken}
+        />
+
+        {loading && <Spinner />}
+        {error && <Text color="status-critical">{error}</Text>}
+
+        {/* Display fetched results */}
+        <Box width="large" align="start" margin={{ top: "medium" }}>
+          {Object.entries(sentencesByLevel).map(([level, sentences]) => (
+            <Box
+              key={level}
+              border={{ color: "light-4" }}
+              pad="small"
+              margin={{ bottom: "small" }}
+              round="small"
+            >
+              <Heading level={3}>Level {level}</Heading>
+              {sentences.map((s, idx) => (
+                <Box key={idx} margin={{ bottom: "small" }}>
+                  <Text weight="bold">{s.japanese}</Text>
+                  <Text>{s.english}</Text>
+                </Box>
+              ))}
+            </Box>
+          ))}
+        </Box>
+
+        {/* Dropdown Export button */}
+        {Object.keys(sentencesByLevel).length > 0 && (
+          <DropButton
+            label="Export Text"
+            dropAlign={{ top: "bottom", right: "right" }}
+            dropContent={
+              <Box pad="small" gap="small">
+                <Button label="Export Japanese Only" onClick={exportJapaneseOnly} />
+                <Button label="Export English Only" onClick={exportEnglishOnly} />
+                <Button label="Export Full Sentences" onClick={exportFullText} />
+                <Button label="Export as JSON" onClick={exportAsJSON} />
+              </Box>
+            }
+          />
+        )}
       </Box>
     </Grommet>
   );
 }
+
+export default WaniKaniSentenceApp;
