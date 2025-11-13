@@ -1,14 +1,12 @@
 import React, { useState } from 'react';
-import { Grommet, Box, Heading, TextInput, Button, DataTable, Text, Spinner, Form, FormField, Layer } from 'grommet';
+import { Grommet, Box, Heading, TextInput, Button, DataTable, Text, Spinner, Form, FormField, Layer, DropButton, Menu } from 'grommet';
 
-// Minimal Grommet theme (optional)
 const theme = {
   global: {
     font: { family: 'Helvetica, Arial, sans-serif' },
   },
 };
 
-// Helper: fetch a paginated collection, following `pages.next_url` until null
 async function fetchAllPages(url, headers, onProgress) {
   let all = [];
   let next = url;
@@ -19,34 +17,26 @@ async function fetchAllPages(url, headers, onProgress) {
     if (json.data && Array.isArray(json.data)) {
       all = all.concat(json.data);
     }
-    // pages.next_url in the collection
     next = json.pages && json.pages.next_url ? json.pages.next_url : null;
     if (onProgress) onProgress(all.length);
-    // NOTE: respect rate limits. Caller should handle backoff if needed.
   }
   return all;
 }
 
-// Try to extract example sentences from a subject's data. WaniKani vocabulary subjects sometimes include context sentences
-// This function searches for common keys and falls back to heuristics.
 function extractSentencesFromSubject(subject) {
   const data = subject.data || {};
-  // Common place (may or may not exist): data.context_sentences
   if (Array.isArray(data.context_sentences) && data.context_sentences.length) {
     return data.context_sentences.map((s, i) => ({ id: `${subject.id}-ctx-${i}`, japanese: s.ja || s.japanese || s.jp || s.ja_text || s.text || '', english: s.en || s.english || s.en_text || '' }));
   }
-  // Some subjects include `context_sentences` as array of objects in other shapes — try detect arrays of objects that look like sentences
   for (const key of Object.keys(data)) {
     const val = data[key];
     if (Array.isArray(val) && val.length && typeof val[0] === 'object') {
-      // heuristic: object contains `ja` or `japanese` or `en` or `english` or `meaning`
       const looksLikeSentence = val.some(v => v && (v.ja || v.japanese || v.en || v.english || v.text));
       if (looksLikeSentence) {
         return val.map((s, i) => ({ id: `${subject.id}-${key}-${i}`, japanese: s.ja || s.japanese || s.text || '', english: s.en || s.english || '' }));
       }
     }
   }
-  // fallback: no dedicated sentences - try to create a short example from the subject `characters` or `meanings`
   if (data.characters) {
     return [{ id: `${subject.id}-fallback-0`, japanese: data.characters, english: (data.meanings && data.meanings[0] && data.meanings[0].meaning) || '' }];
   }
@@ -54,11 +44,11 @@ function extractSentencesFromSubject(subject) {
 }
 
 export default function App() {
-  const [apiToken, setApiToken] = useState('');
+  const [apiToken, setApiToken] = useState('bd3399a6-3daa-45c7-96b2-96b612c40d92');
   const [level, setLevel] = useState('1');
   const [loading, setLoading] = useState(false);
   const [progressCount, setProgressCount] = useState(0);
-  const [groups, setGroups] = useState({}); // { level: [ { subject_id, sentences: [{japanese, english}] } ] }
+  const [groups, setGroups] = useState({});
   const [error, setError] = useState();
   const [showExportLayer, setShowExportLayer] = useState(false);
 
@@ -71,12 +61,9 @@ export default function App() {
       if (!apiToken) throw new Error('Please provide your WaniKani API token.');
       const headers = { Authorization: `Bearer ${apiToken}`, 'Wanikani-Revision': '20170710' };
 
-      // 1) Get all vocabulary subjects for the requested level
-      // Use subjects endpoint with filters: types=vocabulary&levels=<level>&per_page=500
       const baseUrl = `https://api.wanikani.com/v2/subjects?types=vocabulary&levels=${encodeURIComponent(level)}&per_page=500`;
       const subjects = await fetchAllPages(baseUrl, headers, (n) => setProgressCount(n));
 
-      // 2) For each subject, extract sentences heuristically
       const levelKey = `Level ${level}`;
       const collected = [];
       for (const s of subjects) {
@@ -94,38 +81,40 @@ export default function App() {
     }
   }
 
-  function handleSaveJSON() {
-    const blob = new Blob([JSON.stringify(groups, null, 2)], { type: 'application/json' });
+  function saveFile(filename, content, type = 'text/plain') {
+    const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `wanikani-sentences-level-${level}.json`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
   }
 
-  function handleSaveText() {
-    // produce a simple text list grouped by subject
+  function handleSaveJSON() {
+    saveFile(`wanikani-sentences-level-${level}.json`, JSON.stringify(groups, null, 2), 'application/json');
+  }
+
+  function exportText(option) {
     let lines = [];
     for (const [lvl, items] of Object.entries(groups)) {
       lines.push(`# ${lvl}`);
       for (const it of items) {
         lines.push(`\n## ${it.characters || it.slug || it.subject_id}`);
         for (const s of it.sentences) {
-          lines.push(`${s.japanese} \t ${s.english}`);
+          if (option === 'japanese') {
+            lines.push(s.japanese);
+          } else if (option === 'english') {
+            lines.push(s.english);
+          } else {
+            lines.push(`${s.japanese} \t ${s.english}`);
+          }
         }
       }
     }
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `wanikani-sentences-level-${level}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveFile(`wanikani-sentences-level-${level}-${option}.txt`, lines.join('\n'));
   }
 
-  // Prepare table data for first level only (simple demo)
   const tableData = [];
   const firstKey = Object.keys(groups)[0];
   if (firstKey) {
@@ -171,7 +160,17 @@ export default function App() {
               <Heading level={3} margin="none">{firstKey} — Sentences</Heading>
               <Box direction="row" gap="small">
                 <Button label="Export JSON" onClick={() => { handleSaveJSON(); setShowExportLayer(true); }} />
-                <Button label="Export TXT" onClick={() => { handleSaveText(); setShowExportLayer(true); }} />
+                <DropButton
+                  label="Export Text"
+                  dropAlign={{ top: 'bottom', right: 'right' }}
+                  dropContent={
+                    <Box pad="small" background="light-2">
+                      <Button label="Japanese Only" onClick={() => { exportText('japanese'); setShowExportLayer(true); }} />
+                      <Button label="English Only" onClick={() => { exportText('english'); setShowExportLayer(true); }} />
+                      <Button label="Both (Japanese + English)" onClick={() => { exportText('both'); setShowExportLayer(true); }} />
+                    </Box>
+                  }
+                />
               </Box>
             </Box>
 
